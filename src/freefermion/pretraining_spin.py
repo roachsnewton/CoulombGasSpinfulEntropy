@@ -14,6 +14,7 @@ def make_loss(log_prob, Es, beta):
         E = Es[state_indices].sum(axis=-1)
         F = jax.lax.stop_gradient(logp / beta + E)
 
+        ### quantities with energy dimensions are in the units of Ry/rs^2
         E_mean = E.mean()
         F_mean = F.mean()
         S_mean = (-logp).mean()
@@ -23,9 +24,14 @@ def make_loss(log_prob, Es, beta):
 
         gradF = (logp * (F - F_mean)).mean()
 
+        ### <E^2>, <E>^2
+        E2_mean = (E**2).mean()
+        E_mean2 = (E.mean())**2
+
         auxiliary_data = {"F_mean": F_mean, "F_std": F_std,
                           "E_mean": E_mean, "E_std": E_std,
                           "S_mean": S_mean, "S_std": S_std,
+                          "E2_mean": E2_mean, "E_mean2": E_mean2,
                          }
 
         return gradF, auxiliary_data
@@ -97,7 +103,15 @@ def pretrain_spin(van, params_van,
         E, E_std, F, F_std, S, S_std = aux["E_mean"], aux["E_std"], \
                                        aux["F_mean"], aux["F_std"], \
                                        aux["S_mean"], aux["S_std"]
-                                       
+        
+        ### capacity heat Cv, Cv1 = beta^2 * <E^2>, Cv2 = beta^2 * <E>^2
+        E_mean2 = aux["E_mean2"]
+        E2_mean = aux["E2_mean"]
+        Cv1 = (beta**2) * E2_mean
+        Cv2 = (beta**2) * E_mean2
+        Cv = Cv1 - Cv2
+        Cv, Cv1, Cv2 = Cv/n, Cv1/n, Cv2/n
+        
         # Quantities per particle
         F, F_std, E, E_std, S, S_std = F/n, F_std/n, E/n, E_std/n, S/n, S_std/n
         F_std = F_std / jnp.sqrt(batch)
@@ -110,9 +124,11 @@ def pretrain_spin(van, params_van,
                 " F: %.6f" % F, "(%.6f)" % F_std,
                 " E: %.6f" % E, "(%.6f)" % E_std,
                 " S: %.6f" % S, "(%.6f)" % S_std,
+                " Cv: %.6f"  % Cv, "=(%.6f ,%.6f)"  % (Cv1, Cv2),
                 " dt: %.3f" % dt)
 
-        f.write( ("%6d" + "  %.6f"*6 + "  %.3f\n") % (i, 
-                    F, F_std, E, E_std, S, S_std, dt) )
+        f.write( ("%6d" + "  %.6f"*9 + "  %.3f\n") % (i, 
+                    F, F_std, E, E_std, S, S_std, 
+                    Cv, Cv1, Cv2, dt) )
 
     return params_van

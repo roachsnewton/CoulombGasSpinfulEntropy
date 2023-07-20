@@ -42,11 +42,11 @@ def make_loss(log_prob, logpsi, logpsi_grad_laplacian, kappa, G, L, rs, Vconst, 
         # Quantities with energy dimensions are in the units of Ry/rs^2
         Ekloc = kinetic.real
         Eploc = potential.real
-        Eloc = Ekloc + Eploc
+        Eloc =  Ekloc + Eploc
         Sloc = -logp_states.real
         Floc = -Sloc / beta + Eloc
 
-        # Calculate H, partialH, H * partialH
+        # Calculate: H, partialH, H * partialH
         H    =  (Ekloc + Eploc) / (rs**2)
         pH   = -(2*Ekloc + Eploc) / (rs**3)
         H_pH = H * pH
@@ -60,9 +60,9 @@ def make_loss(log_prob, logpsi, logpsi_grad_laplacian, kappa, G, L, rs, Vconst, 
         H_pH2_mean = jax.lax.pmean((H_pH**2).mean(), axis_name="p")
         
         # Beta is in the unit of rs^2/Ry
-        beta_rs = beta * (rs**2)
+        # beta_rs = beta * (rs**2)
         # Calculate partial derivatives partialS
-        pS_mean = (beta_rs**2) * (H_mean * pH_mean - H_pH_mean)
+        # pS_mean = (beta_rs**2) * (H_mean * pH_mean - H_pH_mean)
         
         # Changed the energy units Ry/rs^2 -> Ry
         Ekloc = Ekloc/(rs**2)
@@ -85,7 +85,6 @@ def make_loss(log_prob, logpsi, logpsi_grad_laplacian, kappa, G, L, rs, Vconst, 
                       "E_mean": E_mean, "E2_mean": E2_mean,
                       "F_mean": F_mean, "F2_mean": F2_mean,
                       "S_mean": S_mean, "S2_mean": S2_mean,
-                      "pS_mean":   pS_mean,
                       "H_mean":    H_mean,    "H2_mean":    H2_mean,
                       "pH_mean":   pH_mean,   "pH2_mean":   pH2_mean,
                       "H_pH_mean": H_pH_mean, "H_pH2_mean": H_pH2_mean,
