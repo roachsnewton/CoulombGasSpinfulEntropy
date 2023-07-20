@@ -96,8 +96,16 @@ if nup != ndown:
 title_rs = args.rs
 rs = args.rs * (2**(1/dim))
 
-# Length: L = sqrt(pi * N) * (a0 * rs)
-# Temperature: beta = 1 / (4 * Theta) * (rs^2 / Ry)
+'''
+3D: 
+    Length: L = (4/3 * pi * N)^(1/3) * (a0 * rs)
+    Fermi Temperature: kB * TF = (4.5 * pi)^(2/3) （Ry / rs^2)
+    Temperature: beta = 1 / (4 * Theta) * (rs^2 / Ry)
+2D: 
+    Length: L = sqrt(pi * N) * (a0 * rs)
+    Fermi Temperature: kB * TF = 4 （Ry / rs^2)
+    Temperature: beta = 1 / (4 * Theta) * (rs^2 / Ry)
+'''
 Theta = args.Theta
 if dim == 3:
     L = (4/3*jnp.pi*n/2)**(1/3)
@@ -379,9 +387,8 @@ for i in range(args.epoch_finished + 1, args.epoch + 1):
                               "K_mean": 0., "K2_mean": 0.,
                               "V_mean": 0., "V2_mean": 0.,
                               "S_mean": 0., "S2_mean": 0.,
-                              "pS_mean": 0.,
-                              "H_mean": 0., "H2_mean": 0.,
-                              "pH_mean": 0., "pH2_mean": 0.,
+                              "H_mean": 0.,    "H2_mean": 0.,
+                              "pH_mean": 0.,   "pH2_mean": 0.,
                               "H_pH_mean": 0., "H_pH2_mean": 0.,
                               }, num_devices)
     grads_acc = src.shard( jax.tree_map(jnp.zeros_like, (params_van, params_flow)) )
@@ -409,6 +416,7 @@ for i in range(args.epoch_finished + 1, args.epoch + 1):
                      data_acc, grads_acc, classical_score_acc, quantum_score_acc,
                      classical_fisher_acc, quantum_fisher_acc, quantum_score_mean_acc, final_step)
 
+    ### datas
     data = jax.tree_map(lambda x: x[0], data_acc)
     accept_rate = accept_rate_acc[0] / args.acc_steps
     F, F2_mean = data["F_mean"], data["F2_mean"]
@@ -417,56 +425,64 @@ for i in range(args.epoch_finished + 1, args.epoch + 1):
     V, V2_mean = data["V_mean"], data["V2_mean"]
     S, S2_mean = data["S_mean"], data["S2_mean"]
     
-    pS = data["pS_mean"]
+    ### partial S/ partial rs
     H_mean, H2_mean       = data["H_mean"], data["H2_mean"]
     pH_mean, pH2_mean     = data["pH_mean"], data["pH2_mean"]
     H_pH_mean, H_pH2_mean = data["H_pH_mean"], data["H_pH2_mean"]
+    beta_rs = beta * (rs**2)
     
+    pS1 = (beta_rs**2) * (H_mean * pH_mean)
+    pS2 = (beta_rs**2) * (H_pH_mean)
+    pS = pS1 - pS2
+    
+    ### capacity heat Cv
+    Cv1 = (beta_rs**2) * (H2_mean)
+    Cv2 = (beta_rs**2) * (H_mean**2)
+    Cv = Cv1 - Cv2
+    
+    ### stds
     F_std = jnp.sqrt((F2_mean - F**2) / (args.batch*args.acc_steps))
     E_std = jnp.sqrt((E2_mean - E**2) / (args.batch*args.acc_steps))
     K_std = jnp.sqrt((K2_mean - K**2) / (args.batch*args.acc_steps))
     V_std = jnp.sqrt((V2_mean - V**2) / (args.batch*args.acc_steps))
     S_std = jnp.sqrt((S2_mean - S**2) / (args.batch*args.acc_steps))
     
-    H_std    = jnp.sqrt((H2_mean - H_mean**2) / (args.batch*args.acc_steps))
-    pH_std   = jnp.sqrt((pH2_mean - pH_mean**2) / (args.batch*args.acc_steps))
-    H_pH_std = jnp.sqrt((H_pH2_mean - H_pH_mean**2) / (args.batch*args.acc_steps))
-    beta_rs = beta * (rs**2)
-    pS_std = beta_rs * jnp.sqrt(
-        (H_std**2) * (pH_mean**2) + (pH_std**2) * (H_mean**2) + H_pH_std**2
-        )
-    
-    # Quantities per particle.
-    # The quantities with energy dimension in units of Ry.
+    ### Quantities per particle.
+    ### The quantities with energy dimension in units of Ry.
     F, F_std = F/n, F_std/n
     E, E_std = E/n, E_std/n
     K, K_std = K/n, K_std/n
     V, V_std = V/n, V_std/n
     S, S_std = S/n, S_std/n
-    pS, pS_std = pS/(n**2), pS_std/(n**2)
     
+    ### My quantities
+    pS, pS1, pS2 = pS/n, pS1/n, pS2/n
+    Cv, Cv1, Cv2 = Cv/n, Cv1/n, Cv2/n
+    
+    ### time used
     t1 = time.time()
     dt = t1-t0
     
+    ### data to print and save
     print("iter: %05d" % i,
             " F: %.6f" % F, "(%.6f)" % F_std,
             " E: %.6f" % E, "(%.6f)" % E_std,
             " K: %.6f" % K, "(%.6f)" % K_std,
             " V: %.6f" % V, "(%.6f)" % V_std,
             " S: %.6f" % S, "(%.6f)" % S_std,
-            " pS: %.6f"  % pS, "(%.6f)" % pS_std,
+            " pS: %.6f"  % pS, "=(%.6f , %.6f)"  % (pS1, pS2),
+            " Cv: %.6f"  % Cv, "=(%.6f , %.6f)"  % (Cv1, Cv2),
             " acc: %.4f" % accept_rate,
             " dt: %.3f" % dt)
-    #print(H_mean, pH_mean, H_pH_mean)
-    #print(H_std, pH_std, H_pH_std)
     
-    f.write( ("%6d" + "  %.6f"*12 + "  %.4f" + "  %.3f"+ "\n") % (i,
+    f.write( ("%6d" + "  %.6f"*16 + "  %.4f" + "  %.3f"+ "\n") % (i,
                                                 F, F_std,
                                                 E, E_std,
                                                 K, K_std,
                                                 V, V_std,
                                                 S, S_std, 
-                                                pS, pS_std, 
+                                                pS, pS1, pS2,
+                                                Cv, Cv1, Cv2,
                                                 accept_rate, dt) )
 
     if i % 100 == 0:
@@ -478,30 +494,6 @@ for i in range(args.epoch_finished + 1, args.epoch + 1):
         save_ckpt_filename = src.ckpt_filename(i, path)
         src.save_data(ckpt, save_ckpt_filename)
         print("Save checkpoint file: %s" % save_ckpt_filename)
-
-        ### plot figure
-        fig = plt.figure(figsize=(12, 5))
-        x0 = jnp.reshape(x, (args.batch*n, dim)) 
-        ## figure 1
-        plt.subplot(1, 2, 1, aspect=1)
-        plt.title(['x epochs = ', i])
-        H, xedges, yedges = np.histogram2d(x0[:, 0], x0[:, 1], bins=100, 
-                                            range=((0, L), (0, L)), density=True)
-        plt.imshow(H, interpolation="nearest", 
-                    extent=(xedges[0], xedges[-1], yedges[0], yedges[-1]), cmap="inferno")
-        plt.xlim([0, L])
-        plt.ylim([0, L])
-        # figure 2
-        plt.subplot(1, 2, 2, aspect=1)
-        plt.title(['x epochs = ', i])
-        plt.scatter(x[0, 0, 0:nup, 0], x[0, 0, 0:nup, 1])
-        plt.scatter(x[0, 0, nup:n, 0], x[0, 0, nup:n, 1])
-        plt.xlim([0, L])
-        plt.ylim([0, L])
-        #####
-        figure_name = os.path.join(path, "fig%06d.jpg" % i)
-        plt.savefig(figure_name)
-        plt.close('all')
     
 f.close()
 
